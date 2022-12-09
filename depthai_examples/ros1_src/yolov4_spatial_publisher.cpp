@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
     auto colorQueue = _dev->getOutputQueue("preview", 30, false);
     auto detectionQueue = _dev->getOutputQueue("detections", 30, false);
     auto depthQueue = _dev->getOutputQueue("depth", 30, false);
-    auto calibrationHandler = _dev->readCalibration();
+    // auto calibrationHandler = _dev->readCalibration();
     int width, height;
     if(monoResolution == "720p") {
         width = 1280;
@@ -173,14 +173,18 @@ int main(int argc, char** argv) {
         throw std::runtime_error("Invalid mono camera resolution.");
     }
 
-    auto boardName = calibrationHandler.getEepromData().boardName;
-    if(height > 480 && boardName == "OAK-D-LITE") {
-        width = 640;
-        height = 480;
-    }
+    // auto boardName = calibrationHandler.getEepromData().boardName;
+    // if(height > 480 && boardName == "OAK-D-LITE") {
+    //     width = 640;
+    //     height = 480;
+    // }
+
+    std::string color_uri = camera_param_uri + "/" + "color.yaml";
+    std::string left_uri = camera_param_uri + "/" + "left.yaml";
+    std::string right_uri = camera_param_uri + "/" + "right.yaml";
 
     dai::rosBridge::ImageConverter rgbConverter(tfPrefix + "_rgb_camera_optical_frame", false);
-    auto rgbCameraInfo = rgbConverter.calibrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::RGB, 416, 416);
+    // auto rgbCameraInfo = rgbConverter.calibrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::RGB, 416, 416);
     rgbPublish = std::make_unique<dai::rosBridge::BridgePublisher<sensor_msgs::Image, dai::ImgFrame>>(
         colorQueue,
         pnh,
@@ -191,7 +195,7 @@ int main(int argc, char** argv) {
                   std::placeholders::_1,
                   std::placeholders::_2),
         30,
-        rgbCameraInfo,
+        color_uri,
         "color");
 
     dai::rosBridge::SpatialDetectionConverter detConverter(tfPrefix + "_rgb_camera_optical_frame", 416, 416, false);
@@ -203,14 +207,14 @@ int main(int argc, char** argv) {
         30);
 
     dai::rosBridge::ImageConverter depthConverter(tfPrefix + "_right_camera_optical_frame", true);
-    auto rightCameraInfo = depthConverter.calibrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::RIGHT, width, height);
+    // auto rightCameraInfo = depthConverter.left_uribrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::RIGHT, width, height);
     depthPublish = std::make_unique<dai::rosBridge::BridgePublisher<sensor_msgs::Image, dai::ImgFrame>>(
         depthQueue,
         pnh,
         std::string("stereo/depth"),
         std::bind(&dai::rosBridge::ImageConverter::toRosMsg, &depthConverter, std::placeholders::_1, std::placeholders::_2),
         30,
-        rightCameraInfo,
+        right_uri,
         "stereo");
 
     depthPublish->addPublisherCallback();
