@@ -1,26 +1,20 @@
 
-#include <chrono>
 #include <cstdio>
-#include <functional>
 #include <iostream>
-#include <tuple>
 
-#include "ros/node_handle.h"
+#include "ros/ros.h"
 // #include "utility.hpp"
-#include "camera_info_manager/camera_info_manager.h"
+#include <camera_info_manager/camera_info_manager.h>
+
+#include <functional>
+
 #include "sensor_msgs/Image.h"
 
 // Inludes common necessary includes for development using depthai library
 #include <depthai_bridge/BridgePublisher.hpp>
 #include <depthai_bridge/ImageConverter.hpp>
 
-#include "depthai/device/DataQueue.hpp"
-#include "depthai/device/Device.hpp"
-#include "depthai/pipeline/Pipeline.hpp"
-#include "depthai/pipeline/node/ColorCamera.hpp"
-#include "depthai/pipeline/node/MonoCamera.hpp"
-#include "depthai/pipeline/node/StereoDepth.hpp"
-#include "depthai/pipeline/node/XLinkOut.hpp"
+#include "depthai/depthai.hpp"
 
 dai::Pipeline createPipeline(bool lrcheck, bool extended, bool subpixel, int confidence, int LRchecktresh, std::string resolution) {
     dai::Pipeline pipeline;
@@ -73,7 +67,7 @@ dai::Pipeline createPipeline(bool lrcheck, bool extended, bool subpixel, int con
     colorCam->setBoardSocket(dai::CameraBoardSocket::RGB);
 
     colorCam->setResolution(dai::ColorCameraProperties::SensorResolution::THE_1080_P);
-    colorCam->setInterleaved(true);
+    colorCam->setInterleaved(false);
 
     // Link plugins CAM -> XLINK
     colorCam->video.link(xlinkOut->input);
@@ -102,17 +96,26 @@ int main(int argc, char** argv) {
     bool lrcheck, extended, subpixel;
     int confidence = 200;
     int LRchecktresh = 5;
+    int badParams = 0;
 
-    getParamWithWarning(pnh, "tf_prefix", tfPrefix);
-    getParamWithWarning(pnh, "camera_param_uri", camera_param_uri);
-    getParamWithWarning(pnh, "lrcheck", lrcheck);
-    getParamWithWarning(pnh, "extended", extended);
-    getParamWithWarning(pnh, "subpixel", subpixel);
-    getParamWithWarning(pnh, "confidence", confidence);
-    getParamWithWarning(pnh, "LRchecktresh", LRchecktresh);
+    badParams += !pnh.getParam("camera_param_uri", camera_param_uri);
+    badParams += !pnh.getParam("tf_prefix", tfPrefix);
+    badParams += !pnh.getParam("lrcheck", lrcheck);
+    badParams += !pnh.getParam("extended", extended);
+    badParams += !pnh.getParam("subpixel", subpixel);
+    badParams += !pnh.getParam("confidence", confidence);
+    badParams += !pnh.getParam("LRchecktresh", LRchecktresh);
 
+    if(badParams > 0) {
+        std::cout << " Bad parameters -> " << badParams << std::endl;
+        throw std::runtime_error("Couldn't find %d of the parameters");
+    }
+
+    //dai::DeviceInfo device_info("169.254.1.222");
     dai::Pipeline pipeline = createPipeline(lrcheck, extended, subpixel, confidence, LRchecktresh, monoResolution);
+    std::cout<< "uploading pipeline...\n";
     dai::Device device(pipeline);
+    std::cout<< "...pipeline upload !\n";
     auto calibrationHandler = device.readCalibration();
 
     auto stereoQueue = device.getOutputQueue("depth", 30, false);
