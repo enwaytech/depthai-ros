@@ -1,5 +1,8 @@
 
-#include <depthai_bridge/ImageConverter.hpp>
+#include "depthai_bridge/ImageConverter.hpp"
+
+#include "depthai_bridge/depthaiUtility.hpp"
+#include "opencv2/imgcodecs.hpp"
 
 namespace dai {
 
@@ -21,17 +24,79 @@ std::unordered_map<dai::RawImgFrame::Type, std::string> ImageConverter::planarEn
     {dai::RawImgFrame::Type::NV12, "rgb8"},
     {dai::RawImgFrame::Type::YUV420p, "rgb8"}};
 
-ImageConverter::ImageConverter(bool interleaved) : _daiInterleaved(interleaved), _steadyBaseTime(std::chrono::steady_clock::now()) {
+ImageConverter::ImageConverter(bool interleaved, bool getBaseDeviceTimestamp)
+    : _daiInterleaved(interleaved), _steadyBaseTime(std::chrono::steady_clock::now()), _getBaseDeviceTimestamp(getBaseDeviceTimestamp) {
     _rosBaseTime = ::ros::Time::now();
 }
 
-ImageConverter::ImageConverter(const std::string frameName, bool interleaved)
-    : _frameName(frameName), _daiInterleaved(interleaved), _steadyBaseTime(std::chrono::steady_clock::now()) {
+ImageConverter::ImageConverter(const std::string frameName, bool interleaved, bool getBaseDeviceTimestamp)
+    : _frameName(frameName), _daiInterleaved(interleaved), _steadyBaseTime(std::chrono::steady_clock::now()), _getBaseDeviceTimestamp(getBaseDeviceTimestamp) {
     _rosBaseTime = ::ros::Time::now();
+}
+
+void ImageConverter::toRosMsgFromBitStream(std::shared_ptr<dai::ImgFrame> inData,
+                                           std::deque<ImageMsgs::Image>& outImageMsgs,
+                                           dai::RawImgFrame::Type type,
+                                           const sensor_msgs::CameraInfo& info) {
+    std::chrono::_V2::steady_clock::time_point tstamp;
+    if(_getBaseDeviceTimestamp)
+        tstamp = inData->getTimestampDevice();
+    else
+        tstamp = inData->getTimestamp();
+    ImageMsgs::Image outImageMsg;
+    StdMsgs::Header header;
+    header.frame_id = _frameName;
+    header.stamp = getFrameTime(_rosBaseTime, _steadyBaseTime, tstamp);
+    std::string encoding;
+    int decodeFlags;
+    cv::Mat output;
+    switch(type) {
+        case dai::RawImgFrame::Type::BGR888i: {
+            encoding = sensor_msgs::image_encodings::BGR8;
+            decodeFlags = cv::IMREAD_COLOR;
+            break;
+        }
+        case dai::RawImgFrame::Type::GRAY8: {
+            encoding = sensor_msgs::image_encodings::MONO8;
+            decodeFlags = cv::IMREAD_GRAYSCALE;
+            break;
+        }
+        case dai::RawImgFrame::Type::RAW8: {
+            encoding = sensor_msgs::image_encodings::TYPE_16UC1;
+            decodeFlags = cv::IMREAD_GRAYSCALE;
+            break;
+        }
+        default: {
+            throw(std::runtime_error("Converted type not supported!"));
+        }
+    }
+
+    output = cv::imdecode(cv::Mat(inData->getData()), decodeFlags);
+
+    // converting disparity
+    if(type == dai::RawImgFrame::Type::RAW8) {
+        auto factor = (info.K[0] * info.P[3]);
+        cv::Mat depthOut = cv::Mat(cv::Size(output.cols, output.rows), CV_16UC1);
+        depthOut.forEach<short>([&output, &factor](short& pixel, const int* position) -> void {
+            auto disp = output.at<int8_t>(position);
+            if(disp == 0)
+                pixel = 0;
+            else
+                pixel = factor / disp;
+        });
+        output = depthOut.clone();
+    }
+    cv_bridge::CvImage(header, encoding, output).toImageMsg(outImageMsg);
+    outImageMsgs.push_back(outImageMsg);
+    return;
 }
 
 void ImageConverter::toRosMsg(std::shared_ptr<dai::ImgFrame> inData, std::deque<ImageMsgs::Image>& outImageMsgs) {
-    auto tstamp = inData->getTimestamp();
+    std::chrono::_V2::steady_clock::time_point tstamp;
+    if(_getBaseDeviceTimestamp)
+        tstamp = inData->getTimestampDevice();
+    else
+        tstamp = inData->getTimestamp();
     ImageMsgs::Image outImageMsg;
     StdMsgs::Header header;
     header.frame_id = _frameName;
